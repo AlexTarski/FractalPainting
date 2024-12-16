@@ -8,6 +8,10 @@ using FractalPainting.Infrastructure.Common;
 using FractalPainting.Infrastructure.UiActions;
 using FractalPainting.UI;
 using Ninject;
+using Ninject.Extensions.Factory;
+using Ninject.Extensions.Conventions;
+using System.ComponentModel;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace FractalPainting.App;
 
@@ -15,83 +19,51 @@ public static class DIContainerTask
 {
 	public static MainWindow CreateMainWindow()
 	{
-		// Example: ConfigureContainer()...
-		return new MainWindow();
+		var container = ConfigureContainer();
+		return container.Get<MainWindow>();
 	}
 
 	public static StandardKernel ConfigureContainer()
 	{
-		var container = new StandardKernel();
+        var container = new StandardKernel();
+        container.Bind(
+                c => c.FromThisAssembly().SelectAllClasses().InheritedFrom<IUiAction>().BindAllInterfaces()
+                );
+        container.Bind<MainWindow>().ToSelf().InSingletonScope();
+        container.Bind<AppSettings>().ToMethod(context => context.Kernel.Get<SettingsManager>().Load())
+            .InSingletonScope();
+        container.Bind<IImageController>().ToMethod(context => context.Kernel.Get<AvaloniaImageController>())
+            .InSingletonScope();
+        container.Bind<ImageSettings>().ToMethod(context => context.Kernel.Get<AppSettings>().ImageSettings)
+            .InSingletonScope();
+        container.Bind<Palette>().ToSelf().InSingletonScope();
+        container.Bind<IDragonPainterFactory>().ToFactory();
+        container.Bind<IObjectSerializer>().To<XmlObjectSerializer>()
+            .WhenInjectedInto<SettingsManager>().InSingletonScope();
+        container.Bind<IBlobStorage>().To<FileBlobStorage>()
+            .WhenInjectedInto<SettingsManager>().InSingletonScope();
+        container.Bind<SettingsManager>().ToSelf().InSingletonScope();
 
-		// Example
-		// container.Bind<TService>().To<TImplementation>();
-
-		return container;
-	}
-}
-
-public static class Services
-{
-	private static readonly SettingsManager settingsManager;
-	private static readonly AvaloniaImageController ImageController;
-	private static readonly Palette palette;
-	private static readonly AppSettings appSettings;
-	private static Window MainWindow { get; set; }
-
-	static Services()
-	{
-		palette = new Palette();
-		ImageController = new AvaloniaImageController();
-		settingsManager = new SettingsManager(new XmlObjectSerializer(), new FileBlobStorage());
-		appSettings = settingsManager.Load();
-	}
-
-	public static SettingsManager GetSettingsManager()
-	{
-		return settingsManager;
-	}
-
-	public static AvaloniaImageController GetImageController()
-	{
-		return ImageController;
-	}
-
-	public static Palette GetPalette()
-	{
-		return palette;
-	}
-
-	public static ImageSettings GetImageSettings()
-	{
-		return appSettings.ImageSettings;
-	}
-
-	public static AppSettings GetAppSettings()
-	{
-		return appSettings;
-	}
-	
-	public static Window GetMainWindow()
-	{
-		return MainWindow;
-	}
-
-	public static void SetMainWindow(Window window)
-	{
-		MainWindow = window;
-	}
+        return container;
+    }
 }
 
 public class DragonFractalAction : IUiAction
 {
-	public MenuCategory Category => MenuCategory.Fractals;
+    private readonly IDragonPainterFactory _painterFactory;
+    private Func<Window> getMainWindow;
+
+    public MenuCategory Category => MenuCategory.Fractals;
 	public string Name => "Дракон";
 	public event EventHandler? CanExecuteChanged;
 
-	public DragonFractalAction()
-	{ }
+    public DragonFractalAction(Func<Window> getWindow, IDragonPainterFactory painterFactory)
+    {
+        _painterFactory = painterFactory;
+		getMainWindow = getWindow;
+    }
 
-	public bool CanExecute(object? parameter)
+    public bool CanExecute(object? parameter)
 	{
 		return true;
 	}
@@ -100,11 +72,11 @@ public class DragonFractalAction : IUiAction
 	{
 		var dragonSettings = CreateRandomSettings();
 		// редактируем настройки:
-		await new SettingsForm(dragonSettings).ShowDialog(Services.GetMainWindow());
+		await new SettingsForm(dragonSettings).ShowDialog(DIContainerTask.CreateMainWindow());
 		// создаём painter с такими настройками
-		var painter = new DragonPainter(Services.GetImageController(), dragonSettings);
-		painter.Paint();
-	}
+        var painter = _painterFactory.CreateDragonPainter(dragonSettings);
+        painter.Paint();
+    }
 
 	private static DragonSettings CreateRandomSettings()
 	{
@@ -118,18 +90,21 @@ public class KochFractalAction : IUiAction
 	public string Name => "Кривая Коха";
 	public event EventHandler? CanExecuteChanged;
 
-	public KochFractalAction()
-	{ }
+    private readonly Lazy<KochPainter> _painter;
 
-	public bool CanExecute(object? parameter)
+    public KochFractalAction(Lazy<KochPainter> painter)
+    {
+        _painter = painter;
+    }
+
+    public bool CanExecute(object? parameter)
 	{
 		return true;
 	}
 
 	public void Execute(object? parameter)
 	{
-		var painter = new KochPainter(Services.GetImageController(), Services.GetPalette());
-		painter.Paint();
+		_painter.Value.Paint();
 	}
 }
 
@@ -137,11 +112,13 @@ public class DragonPainter
 {
 	private readonly IImageController imageController;
 	private readonly DragonSettings settings;
+	private readonly Palette palette;
 
-	public DragonPainter(IImageController imageController, DragonSettings settings)
+	public DragonPainter(IImageController imageController, DragonSettings settings, Palette palette)
 	{
 		this.imageController = imageController;
 		this.settings = settings;
+		this.palette = palette;
 	}
 
 	public void Paint()
@@ -179,4 +156,9 @@ public class DragonPainter
 
 		imageController.UpdateUi();
 	}
+}
+
+public interface IDragonPainterFactory
+{
+    DragonPainter CreateDragonPainter(DragonSettings settings);
 }

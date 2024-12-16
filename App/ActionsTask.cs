@@ -109,18 +109,6 @@ public partial class MainWindow : Window
     private Menu? menu;
     private ImageControl? image;
 
-    public MainWindow() : this(
-            new IUiAction[]
-            {
-                new SaveImageAction(Services.GetMainWindow, Services.GetImageController()),
-                new DragonFractalAction(),
-                new KochFractalAction(),
-                new ImageSettingsAction(Services.GetImageSettings(), Services.GetImageController(), Services.GetMainWindow),
-                new PaletteSettingsAction(Services.GetMainWindow, Services.GetPalette())
-            }, Services.GetImageController())
-    {
-    }
-
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);
@@ -136,7 +124,6 @@ public partial class MainWindow : Window
         ClientSize = new Size(imageSettings.Width, imageSettings.Height + MenuSize);
         menu.ItemsSource = actions.ToMenuItems();
         Title = "Fractal Painter";
-        Services.SetMainWindow(this);
 
         imageController.SetControl(image);
         imageController.RecreateImage(imageSettings);
